@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-gpu
+spec:
+  nodeSelector:
+    gpu: 'true' # nodeSelector를 통해 파드 스케줄링 노드 설정
+  containers:
+    - name: kubia
+      image: luksa/kubia
