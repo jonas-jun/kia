@@ -103,7 +103,7 @@ node1에 문제가 생겨도 레플리케이션컨트롤러가 관리하는 pod 
 - 누군가 기존 파드의 type을 변경한다.
 - 누군가 의도하는 파드 수를 줄인다.
 
-> 파드 type이라기 보다는 특정 레이블 셀렉터와 일치한느 파드 세트에 작동한다.
+> 파드 type이라기 보다는 특정 레이블 셀렉터와 일치하는 파드 세트에 작동한다.
 
 ![loop](img/r_con_loop.png)
 
@@ -113,5 +113,201 @@ node1에 문제가 생겨도 레플리케이션컨트롤러가 관리하는 pod 
 - 레플리카 수(replica count): 실행할 파드의 의도하는(desired) 수 지정
 - 파드 템플릿(pod template): 새로운 파드 레플리카를 만들 때 사용된다.
 - 모두 변경할 수 있지만 레플리카 수의 변경만 기존 파드에 영향을 미친다.
+- 레이블 셀렉터가 변경되면 레플리케이션컨트롤러가 지금부터 관리하는 파드가 달라진다.
+- 템플릿은 레플리케이션컨트롤러가 새 파드를 생성할 때만 영향을 미친다.
 
   ![element](img/element.jpg)
+
+**레플리케이션컨트롤러 사용 이점**
+
+- 기존 파드가 사라지면 새 파드를 시작해서 파드가 항상 유지되도록 한다.
+- 노드에 장애가 발생하면 해당 노드의 파드들의 복제본이 생성된다. (파드는 노드를 교체하지 않는다. 다른 노드에 새롭게 파드를 생성한다.)
+- 수동 또는 자동으로 파드를 수평으로 확장할 수 있게 한다.
+
+### 2.2 레플리케이션컨트롤러 생성
+
+```yaml
+# kubia-rc.yaml
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  selector:
+    app: kubia # 이게 설정되지 않으면 아래 템플릿의 레이블로 자동 설정된다.
+template:
+  metadata:
+    labels:
+      app: kubia
+  spec:
+    containers:
+      - name: kubia
+        image: luksa/kubia
+        ports:
+          - containerPort: 8080
+```
+
+- 레이블 셀렉터 app=kubia와 일치한느 파드 인스턴스가 3갤르 유지하도록 한다.
+- 템플릿의 파드 레이블은 레플리케이션컨트롤러의 레이블 셀렉터와 완전히 일치해야 한다. 그렇지 않으면 새 파드를 무한정 생성하게 될 수 있다. 해당되는 파드의 숫자가 늘어나지 않기 때문에
+- 셀렉터를 지정하지 않으면 템플릿의 레이블로 자동 설정된다.
+
+```bash
+kubectl create -f kubia-rc.yaml
+kubectl get pods # replicas: 3 개수만큼 kubia 라는 이름의 파드가 생성된다.
+```
+
+삭제된 파드에 대한 컨트롤러의 반응 확인
+
+```bash
+kubectl delete pod kubia-8nsmr
+```
+
+![rebuild](img/controller_rebuild.png)
+
+레이블을 변경해보기
+
+```bash
+kubectl label pod kubia-dm5xq type=special
+kubectl label pod kubia-vqdx8 app=foo --overwrite
+```
+
+- 새로운 레이블을 추가해줬을 때: app=kubia 라벨은 그대로 있기 때문에 레플리카의 수는 3개 그대로 유지
+- 하나의 파드의 레이블을 app=kubia가 아닌 걸로 바꿔줬을 때: app=kubia 파드 수를 3개로 맞추기 위해 새로운 파드 생성
+  ![change_label](img/change_label.png)
+
+![outofcon](img/outofcontrol.png)
+
+- app=kubia를 제거해준 파드가 레플리케이션컨트롤러의 컨트롤에서 벗어나게 된다. -> 삭제해도 아무일도 일어나지 않는다.
+
+- 파드가 오작동할 때는 레플리케이션컨트롤러 범위에서 꺼내서 테스트 한 후 삭제한다.
+- 컨트롤러의 레이블 셀렉터를 변경할 수 있다. 파드를 관리하는 다른 리소스들은 레이블 셀렉터를 변경할 수 없지만 레플리케이션컨트롤러는 가능하다.
+
+### 2.5 파드 템플릿 변경
+
+새로 생성될 파드에만 영향을 미친다.
+
+```bash
+kubectl edit rc kubia # rc.yaml 정의가 열린다. 여기서 수정 가능
+```
+
+### 2.6 수평 파드 스케일링
+
+- replica 값을 변경한다. 기존 파드가 많으면 일부를 삭제하고, 적으면 추가로 생성한다.
+
+```bash
+kubectl scale rc kubia --replicas=10
+
+kubectl edit rc kubia
+```
+
+### 2.7 레플리케이션컨트롤러 삭제
+
+- cascade=false 값을 주면 컨트롤러 영향에 있는 파드들은 그대로 유지한 채 rc만 삭제가 된다.
+- 이후 적절한 레이블 셀렉터를 사용하는 새 rc를 작성해 관리할 수 있다.
+
+```bash
+kubectl delete rc kubia --cascade=false
+```
+
+## 3. 레플리케이션컨트롤러 대신 레플리카셋 사용하기
+
+> 레플리케이션컨트롤러를 대체하게 될 것이다.
+
+- 특정 레이블이 없는 파드나 특정 레이블의 키를 갖는 파드를 매칭할 수 있다. (cf. rc는 특정 레이블이 있는 파드만 매칭 가능)
+- 두 가지 이상의 레이블을 갖는 파드 세트들을 모두 매칭시켜 하나의 그룹으로 취급할 수 있다.
+- 특정 키가 존재하는 파드들을 매칭할 수 있다. (env키가 있는 레이블을 갖는 파드들)
+
+```yaml
+# kubia-replicaset.yaml
+apiVersion: apps/v1 # apps/v1beta2에서 v1으로 바뀜
+kind: ReplicaSet
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubia
+  template:
+    metadata:
+      labels:
+        app: kubia
+    spec:
+      containers:
+        - name: kubia
+          image: luksa/kubia
+```
+
+- selector 아래에 바로 레이블을 넣지 않고 matchLabels를 만들어서 그 아래에 넣는다.
+
+```yaml
+# kubia-replicaset-matchexpressions.yaml
+spec:
+  replicas: 3
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - kubia
+```
+
+- In: 레이블의 값이 지정된 값 중 하나와 일치해야 한다.
+- NotIn: 레이블의 값이 지정된 값과 일치하지 않아야 한다.
+- Exists: 지정된 키를 가진 레이블이 포함돼야 한다. (값은 중요하지 않음) 이 연산자를 사용할 때는 값(value) 필드를 지정하지 않아야 한다.
+- DoesNotExist는 파드에 지정된 키를 가진 레이블이 포함되어 있지 않아야 한다. 값 필드는 지정하지 않는다.
+
+_레플리케이션컨트롤러와 마찬가지로 레플리카셋을 삭제해도 라벨로 연결된 파드들이 삭제된다._
+
+## 4. 데몬셋을 사용해 각 노드에서 한 개의 파드 실행하기
+
+레플리카셋과 달리 데몬셋은 각 노드에 한 개의 파드만 실행시킬 때 사용한다.  
+시스템 수준의 작업을 수행하는 인프라 관련 파드가 이런 경우다.  
+로그 수집기, 리소스 모니터 등
+![daemon](img/daemon.png)
+
+- 노드가 다운되면 데몬셋은 다른 곳에서 파드를 생성하지 않는다.
+- 노드가 추가되면 데몬셋은 새 파드 인스턴스를 새 노드에 배포한다.
+- 실수로 파드 중 하나를 삭제해 노드에 데몬셋 파드가 없는 경우에도 새 파드를 배포한다.
+- 파드 템플릿으로 파드를 생성한다.
+- 스케줄러와 관계 없이 모든 노드에 배포된다.
+  ![dm-ssd](img/daemon_ssd.png)
+
+SSD를 갖는 모든 노드에서 실행돼야 하는 ssd--monitor 데몬. disk=ssd 라벨을 가지고 있는 노드에서 하나씩 실행된다.
+
+```yaml
+# ssd-monitor-daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ssd-monitor
+spec:
+  selector:
+    matchLabels:
+      app: ssd-monitor
+  template:
+    metadata:
+      labels:
+        app: ssd-monitor
+    spec:
+      nodeSelector: # disk=ssd 레이블을 갖는 노드에 배포
+        disk: ssd
+      containers:
+        - name: main
+          image: luksa/ssd-monitor
+```
+
+```bash
+kubectl label node minikube disk=ssd # 노드에 레이블링
+kubectl create -f ssd-monitor-daemonset.yaml
+kubectl get pods
+kubectl get ds # daemonset
+```
+
+```bash
+kubectl label node minikube disk=hdd --overwrite # disk 레이블을 바꿔주면 데몬셋이 배포한 파드가 종료된다
+kubectl delete ds ssd-monitor # 데몬셋을 삭제하면 데몬셋이 배포한 파드들도 삭제된다.
+```
+
+## 5. 완료 가능한 단일 태스크를 수행하는 파드 실행
