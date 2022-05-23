@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-liveness
+spec:
+  containers:
+    - name: kubia
+      image: luksa/kubia-unhealthy
+      livenessProbe:
+        httpGet:
+          path: / # http 요청 경로
+          port: 8080 # 프로브가 연결해야 하는 네트워크 포트
