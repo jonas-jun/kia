@@ -311,3 +311,89 @@ kubectl delete ds ssd-monitor # 데몬셋을 삭제하면 데몬셋이 배포한
 ```
 
 ## 5. 완료 가능한 단일 태스크를 수행하는 파드 실행
+잡 리소스
+- 프로세스가 한번 실행되면 파드를 종료시킨다. 
+- 노드에 장애가 났을 때는 컨테이너를 재시작할 수 있다.
+
+![job](img/job.png)
+
+~~~yaml
+# batch-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      restartPolicy: OnFailure # {OnFailure, Never}
+      containers:
+      - name: main
+        image: luksa/batch-job
+~~~
+- job을 실행시키면 batch-job-bx6q4와 같은 파드가 하나 바로 실행된다. job에서 설정해준 restartPolicy를 갖는다.
+- 위 이미지는 2분이 지나면 작업이 완료된다. pod도 완료된(completed) 상태가 된다.
+
+![job_complete](img/job_complete.png)
+
+## 5.4 잡에서 여러 파드 실행하기
+두 개 이상의 파드를 생성해 병렬/순차적으로 실행하도록 구성할 수 있다. 잡 스펙에 completions와 parallelism 속성을 설정해 수행한다.
+
+순차적으로 잡 파드 실행하기: 잡의 파드를 몇 번 실행할지 completions에 설정한다. 다섯 개의 파드가 완료될 때까지 순차적으로 생성해준다.
+~~~yaml
+# multi-completion-batch-job.yaml
+kind: Job
+metadata:
+  name: multi-completion-batch-job
+spec:
+  completions: 5 # completions 설정
+  template:
+    metadata:
+      labels:
+        app: batch-job
+~~~
+
+병렬로 잡 파드 실행하기: 여러 파드를 병렬로 실행한다. 
+~~~yaml
+# multi-completion-parallel-batch-job.yaml
+kind: Job
+metadata:
+  name: multi-completion-batch-job
+spec:
+  completions: 5
+  parallelism: 2 # 두 개까지 병렬 실행 가능
+~~~
+![parallel](img/job_parallel.png)
+
+
+parallelism을 2에서 3으로 수정. 즉시 하나의 파드가 더 생성된다.
+~~~bash
+> kubectl scale job multi-completion-batch-job --replicas 3
+Error from server (NotFound): the server could not find the requested resource
+~~~
+
+### 5.5 잡 파드가 완료되는 데 걸리는 시간 제한하기
+~~~yaml
+# time-limited-batch-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: time-limited-batch-job
+spec:
+  activeDeadlineSeconds: 30
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      containers:
+      - name: main
+        image: luksa/batch-job
+      restartPolicy: OnFailure
+~~~
+![deadline](img/deadline.png)
+
+## 6. 잡을 주기적으로 또는 한 번 실행되도록 스케줄링 하기
