@@ -16,3 +16,4 @@ spec:
       containers:
         - name: main
           image: luksa/ssd-monitor
+          
