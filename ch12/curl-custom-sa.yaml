@@ -6,7 +6,7 @@ spec:
   serviceAccountName: foo
   containers:
   - name: main
-    image: tutum/curl
+    image: curlimages/curl
     command: ["sleep", "9999999"]
   - name: ambassador
     image: luksa/kubectl-proxy:1.6.2
